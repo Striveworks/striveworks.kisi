@@ -1,5 +1,15 @@
+import json
 import requests
 from ansible.module_utils.basic import AnsibleModule
+
+DOCUMENTATION = """
+---
+module: kisi_user
+short_description: Manage Kisi users
+description: Manage Kisi users
+author: "Will Albers (@walbers)"
+
+"""
 
 
 class AnsibleKisi:
@@ -14,7 +24,7 @@ class AnsibleKisi:
 
     def get_user(self, email):
         query = f"/members?query={email}"
-        response = request.get(self.url + query, headers=self.auth)
+        response = requests.get(self.url + query, headers=self.auth)
 
         if response.status_code != 200:
             self.module.fail_json(
@@ -31,7 +41,7 @@ class AnsibleKisi:
 
     def get_user_groups(self, id):
         query = f"/role_assignments?user_id={id}&scope=group"
-        response = request.get(self.url + query, headers=self.auth)
+        response = requests.get(self.url + query, headers=self.auth)
 
         if response.status_code != 200:
             self.module.fail_json(
@@ -53,17 +63,23 @@ class AnsibleKisi:
         }
 
         if not self.module.check_mode:
-            response = request.patch(self.url + query, headers=self.auth, data=body)
+            response = requests.patch(
+                self.url + query, headers=self.auth, data=json.dumps(body)
+            )
         else:
-            self.exit_messages.append(f"Updated {user['name']} state")
+            self.exit_messages.append(
+                f"Updated {user['name']} state to {not user['access_enabled']}"
+            )
             return
 
         if response.status_code != 204:
             self.module.fail_json(
-                msg=f"Received a {response.status_code} from the Kisi API instead of a 204 for update_user_state"
+                msg=f"Received a {response.status_code} from the Kisi API instead of a 204 for update_user_state\n{response.text}\n{body}\n{user['id']}"
             )
         else:
-            self.exit_messages.append(f"Updated {user['name']} state")
+            self.exit_messages.append(
+                f"Updated {user['name']} state to {not user['access_enabled']}"
+            )
 
     def update_user_role(self, user, role):
         query = "/role_assignments"
@@ -77,9 +93,11 @@ class AnsibleKisi:
         }
 
         if not self.module.check_mode:
-            response = request.post(self.url + query, headers=self.auth, data=body)
+            response = requests.post(
+                self.url + query, headers=self.auth, data=json.dumps(body)
+            )
         else:
-            self.exit_messages.append(f"Updated {user['name']} role")
+            self.exit_messages.append(f"Updated {user['name']} role to {role}")
             return
 
         if response.status_code != 200:
@@ -87,7 +105,7 @@ class AnsibleKisi:
                 msg=f"Received a {response.status_code} from the Kisi API instead of a 200 for update_user_role"
             )
         else:
-            self.exit_messages.append(f"Updated {user['name']} role")
+            self.exit_messages.append(f"Updated {user['name']} role to {role}")
 
     def update_user_access(self, user, all_groups, current_groups, desired_groups):
         query = "/role_assignments"
@@ -104,7 +122,9 @@ class AnsibleKisi:
                 }
             }
             if not self.module.check_mode:
-                response = request.post(self.url + query, headers=self.auth, data=body)
+                response = requests.post(
+                    self.url + query, headers=self.auth, data=json.dumps(body)
+                )
                 if response.status_code != 200:
                     self.module.fail_json(
                         msg=f"Received a {response.status_code} from the Kisi API instead of a 200 for update_user_access"
@@ -120,7 +140,7 @@ class AnsibleKisi:
 
         for group in groups_to_delete:
             if not self.module.check_mode:
-                response = request.delete(
+                response = requests.delete(
                     f"{self.url}{query}/{group}", headers=self.auth
                 )
                 if response.status_code != 204:
@@ -153,9 +173,13 @@ class AnsibleKisi:
         }
 
         if not self.module.check_mode:
-            response = request.post(self.url + query, headers=self.auth, data=body)
+            response = requests.post(
+                self.url + query, headers=self.auth, data=json.dumps(body)
+            )
         else:
-            self.exit_messages.append(f"Updated {user['name']} state")
+            self.exit_messages.append(
+                f"Created user for {name}. Since this is check mode no user was actually created and fake roles can't be assigned so we are done."
+            )
             return
 
         if response.status_code != 200:
@@ -163,12 +187,14 @@ class AnsibleKisi:
                 msg=f"Received a {response.status_code} from the Kisi API instead of a 200 for create_user"
             )
         else:
-            self.exit_messages.append(f"Updated {user['name']} state")
+            self.exit_messages.append(f"Created user for {name}")
+
+        return response.json()
 
     def delete_user(self, user):
         query = f"/members/{user['id']}"
         if not self.module.check_mode:
-            response = request.delete(self.url + query, headers=self.auth)
+            response = requests.delete(self.url + query, headers=self.auth)
         else:
             self.exit_messages.append(f"Deleted {user['name']}")
             return
@@ -182,7 +208,7 @@ class AnsibleKisi:
 
     def get_all_groups(self):
         query = "/groups"
-        response = request.get(self.url + query, headers=self.auth)
+        response = requests.get(self.url + query, headers=self.auth)
 
         if response.status_code != 200:
             self.module.fail_json(
@@ -234,6 +260,10 @@ def main():
     if state == "enabled" or state == "disabled":
         if not user:
             user = kisi.create_user(name, state, email)
+            if module.check_mode:
+                module.exit_json(
+                    changed=bool(kisi.exit_messages), msg=kisi.exit_messages
+                )
         else:
             user = user[0]
 
@@ -264,11 +294,10 @@ def main():
     else:
         module.fail_json(msg=f"The state {state} is not a valid option")
 
+    module.params["api_key"] = ""
     module.exit_json(
-        changed=bool(self.exit_messages), msg="\n".join(self.exit_messages)
+        changed=bool(kisi.exit_messages), msg="\n".join(kisi.exit_messages)
     )
-
-    # TODO: move to striveworks namespace, test, write tests?, publish, install
 
 
 if __name__ == "__main__":
