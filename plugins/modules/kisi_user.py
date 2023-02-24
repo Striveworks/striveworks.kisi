@@ -127,7 +127,7 @@ class AnsibleKisi:
                 )
                 if response.status_code != 200:
                     self.module.fail_json(
-                        msg=f"Received a {response.status_code} from the Kisi API instead of a 200 for update_user_access"
+                        msg=f"Received a {response.status_code} from the Kisi API instead of a 200 for creating membership update_user_access\n{self.url}\n{self.auth}\n{body}\n{response.text}"
                     )
                 else:
                     self.exit_messages.append(
@@ -138,14 +138,30 @@ class AnsibleKisi:
                     f"Gave {user['name']} access to group {group}"
                 )
 
+        if groups_to_delete:
+            response = requests.get(
+                f"{self.url}{query}?user_id={user['user_id']}", headers=self.auth
+            )
+            if response.status_code != 200:
+                self.module.fail_json(
+                    msg=f"Received a {response.status_code} from the Kisi API instead of a 200 for getting role assignment id for delete membership in update_user_access"
+                )
+            role_assignments = response.json()
+
         for group in groups_to_delete:
             if not self.module.check_mode:
+
+                for role_assignment in role_assignments:
+                    if role_assignment.get("group_id") == group:
+                        role_assignment_id = role_assignment["id"]
+                        break
+
                 response = requests.delete(
-                    f"{self.url}{query}/{group}", headers=self.auth
+                    f"{self.url}{query}/{role_assignment_id}", headers=self.auth
                 )
                 if response.status_code != 204:
                     self.module.fail_json(
-                        msg=f"Received a {response.status_code} from the Kisi API instead of a 204 for update_user_access"
+                        msg=f"Received a {response.status_code} from the Kisi API instead of a 204 for deleting membership in update_user_access"
                     )
                 else:
                     self.exit_messages.append(

@@ -32,7 +32,7 @@ class AnsibleKisi:
         # Connect to s3 bucket
         session = boto3.Session(profile_name=module.params["aws_profile"])
         # config = Config(connect_timeout=30, retries={"max_attempts": 1})
-        self.s3 = session.resource("s3") # , config=config
+        self.s3 = session.resource("s3")  # , config=config
 
     def compress_and_upload_file(
         self, data, temp_fiie_dir, aws_bucket_name, aws_bucket_path
@@ -118,7 +118,12 @@ def main():
 
     data = kisi.get_event_export(module.params["place_id"])
 
-    kisi.compress_and_upload_file(data, module.params["temp_fiie_dir"], module.params["aws_bucket_name"], module.params["aws_bucket_path"])
+    kisi.compress_and_upload_file(
+        data,
+        module.params["temp_fiie_dir"],
+        module.params["aws_bucket_name"],
+        module.params["aws_bucket_path"],
+    )
 
     module.params["api_key"] = ""
     module.exit_json(
