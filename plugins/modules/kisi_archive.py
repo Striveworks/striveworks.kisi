@@ -2,9 +2,10 @@ import json
 import requests
 import time
 import boto3
+import os
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime,timezone
 
 # from botocore.config import Config
 from ansible.module_utils.basic import AnsibleModule
@@ -35,35 +36,36 @@ class AnsibleKisi:
         self.s3 = session.resource("s3")  # , config=config
 
     def compress_and_upload_file(
-        self, data, temp_fiie_dir, aws_bucket_name, aws_bucket_path
+        self, data, temp_file_dir, aws_bucket_name, aws_bucket_path
     ):
         # Write data to temp file and compress it
-        tf = tempfile.NamedTemporaryFile(dir=temp_fiie_dir)
+        tf = tempfile.NamedTemporaryFile(dir=temp_file_dir)
         tf.write(data)
         zipfile.ZipFile(tf.name + ".zip", "w", zipfile.ZIP_DEFLATED).write(tf.name)
 
         # Upload and clean up
-        response = s3.Bucket(aws_bucket_name).upload_file(
+        response = self.s3.Bucket(aws_bucket_name).upload_file(
             tf.name + ".zip",
-            aws_bucket_path + (datetime.utcnow()).isoformat() + ".zip",
+            aws_bucket_path + (datetime.now(timezone.utc)).isoformat() + ".zip",
         )
 
         os.remove(tf.name + ".zip")
         tf.close()
-        self.exit_messages("Uploaded data to s3 bucket and deleted temp file")
+        self.exit_messages.append("Uploaded data to s3 bucket and deleted temp file")
 
     def get_event_export(self, place_id):
         # Send create report request
-        query = "/event_exports"
-        current_date = (datetime.utcnow()).isoformat()
+        query = "/reports"
+        current_date = (datetime.now(timezone.utc)).isoformat()
         body = {
-            "event_export": {
-                "around": f"P1M0D/{current_date}",
-                "place_id": place_id,
-                "reference_id": None,
-                "reference_type": None,
-            }
+            "name": f"Event Data Backup for {current_date}",
+            "reporter_id": 5993,
+            "reporter_type": "EventExportReporter",
+            "end_date": current_date,
+            "place_id": place_id
         }
+
+
         response = requests.post(
             self.url + query, headers=self.auth, data=json.dumps(body)
         )
@@ -74,7 +76,7 @@ class AnsibleKisi:
             )
         elif response.status_code != 200:
             self.module.fail_json(
-                msg=f"Failed with error code {response.status_code}\n"
+                msg=f"Event export report creation failed with error code {response.status_code}\n"
             )
 
         event_export = response.json()
@@ -83,16 +85,15 @@ class AnsibleKisi:
         time.sleep(60)
 
         # download report
-        query = f"/event_exports/{event_export['id']}/download"
-        response = requests.get(self.url + query, headers=self.auth)
+        query = f"/reports/{event_export['id']}/download"
+        response = requests.post(self.url + query, headers=self.auth)
 
         if response.status_code != 200:
             self.module.fail_json(
-                msg=f"Failed with error code {response.status_code}\n"
+                msg=f"Downloading report failed with error code {response.status_code}. Event id {event_export['id']}\n"
             )
 
         event_export_download = response.json()
-
         response = requests.get(event_export_download["url"], allow_redirects=True)
         self.exit_messages.append(f"Downloaded event export for place id: {place_id}")
         return response.content
@@ -116,11 +117,15 @@ def main():
     )
     kisi = AnsibleKisi(module)
 
+    print("Start of export")
+
     data = kisi.get_event_export(module.params["place_id"])
+
+    print(module.params)
 
     kisi.compress_and_upload_file(
         data,
-        module.params["temp_fiie_dir"],
+        module.params["temp_file_dir"],
         module.params["aws_bucket_name"],
         module.params["aws_bucket_path"],
     )
