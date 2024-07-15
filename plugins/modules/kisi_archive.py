@@ -117,11 +117,7 @@ def main():
     )
     kisi = AnsibleKisi(module)
 
-    print("Start of export")
-
     data = kisi.get_event_export(module.params["place_id"])
-
-    print(module.params)
 
     kisi.compress_and_upload_file(
         data,
@@ -132,7 +128,7 @@ def main():
 
     module.params["api_key"] = ""
     module.exit_json(
-        changed=bool(kisi.exit_messages), msg="\n".join(kisi.exit_messages)
+        changed=bool(kisi.exit_messages)
     )
 
 
