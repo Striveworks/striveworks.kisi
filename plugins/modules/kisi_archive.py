@@ -36,30 +36,31 @@ class AnsibleKisi:
         self.s3 = session.resource("s3")  # , config=config
 
     def compress_and_upload_file(
-        self, data, temp_file_dir, aws_bucket_name, aws_bucket_path
+        self, data, place_id, temp_file_dir, aws_bucket_name, aws_bucket_path
     ):
         # Write data to temp file and compress it
-        tf = tempfile.NamedTemporaryFile(dir=temp_file_dir)
+        tf = tempfile.NamedTemporaryFile(dir=temp_file_dir, suffix='-' + place_id)
         tf.write(data)
-        zipfile.ZipFile(tf.name + ".zip", "w", zipfile.ZIP_DEFLATED).write(tf.name)
+        filename = tf.name + ".zip"
+        zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED).write(tf.name)
 
         # Upload and clean up
         response = self.s3.Bucket(aws_bucket_name).upload_file(
-            tf.name + ".zip",
+            filename,
             aws_bucket_path + (datetime.now(timezone.utc)).isoformat() + ".zip",
         )
 
-        os.remove(tf.name + ".zip")
+        os.remove(filename)
         tf.close()
         self.exit_messages.append("Uploaded data to s3 bucket and deleted temp file")
 
-    def get_event_export(self, place_id):
+    def get_event_export(self, place_id, event_exporter_id):
         # Send create report request
         query = "/reports"
         current_date = (datetime.now(timezone.utc)).isoformat()
         body = {
-            "name": f"Event Data Backup for {current_date}",
-            "reporter_id": 5993,
+            "name": f"Event Data Backup for { current_date } ({ place_id })",
+            "reporter_id": event_exporter_id,
             "reporter_type": "EventExportReporter",
             "end_date": current_date,
             "place_id": place_id
@@ -104,6 +105,7 @@ def main():
     argument_spec = {
         "api_key": {"type": "str", "required": True},
         "place_id": {"type": "str", "required": True},
+        "event_exporter_id": {"type": "str", "required": True},
         "temp_file_dir": {"type": "str", "default": "/tmp/"},
         "aws_profile": {"type": "str", "default": "default"},
         "aws_bucket_name": {"type": "str", "required": True},
@@ -117,10 +119,11 @@ def main():
     )
     kisi = AnsibleKisi(module)
 
-    data = kisi.get_event_export(module.params["place_id"])
+    data = kisi.get_event_export(module.params["place_id"], module.params["event_exporter_id"])
 
     kisi.compress_and_upload_file(
         data,
+        module.params["place_id"],
         module.params["temp_file_dir"],
         module.params["aws_bucket_name"],
         module.params["aws_bucket_path"],
